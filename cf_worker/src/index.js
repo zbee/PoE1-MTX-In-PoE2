@@ -118,7 +118,18 @@ export default {
 			available: false,
 			checkedUrl: dbUrl,
 			timestamp: Date.now(),
-			debug: {}
+			debug: {
+				httpStatus: null,
+				altHttpStatus: null,
+				checkedAltUrl: false,
+				htmlLength: null,
+				contextScanned: false,
+				contextFail: false,
+				fullPageSearch: false,
+				regexMatch: null,
+				parsedValue: null,
+				reason: null
+			}
 		};
 
 		try {
@@ -136,7 +147,7 @@ export default {
 			// Try again if there's a stop-word slug variant (e.g. "Blightborn_Bow_and_Quiver" instead of "Blightborn_Bow_And_Quiver")
 			const altUrl = generateStopWordSlug(id);
 			if (res.status === 404 && altUrl !== dbUrl) {
-				result.debug.altCheckedUrl = true;
+				result.debug.checkedAltUrl = true;
 
 				const altRes = await fetch(altUrl, {
 					signal: controller.signal,
@@ -201,6 +212,7 @@ export default {
 				const val = match[1].trim();
 				result.debug.parsedValue = val;
 				result.available = (val === '1');
+				result.debug.regexMatch = true;
 				result.debug.reason = result.available ? 'available' : 'not_available';
 			} else {
 				result.debug.regexMatch = false;
