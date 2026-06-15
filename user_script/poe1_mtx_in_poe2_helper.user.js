@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PoE1 MTX In PoE2 Helper
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Displays PoE2 availability for each item in the PoE1 item shop.
 // @author       Ethan Henderson (zbee)
 // @match        https://www.pathofexile.com/shop/category/*
@@ -27,13 +27,22 @@ the GNU General Public License as published by the Free Software Foundation, eit
     'use strict';
 
     const WORKER_URL = 'https://p1mip2.zbee.codes';
-    const CACHE_KEY = 'poe1_mtx_';
-    const CACHE_TTL = 5 * 60 * 60 * 1000; // default 5h fallback
+    const CACHE_KEY = 'poe1_mtx_in_poe2_cache_';
+    const CACHE_TTL = 5 * 60 * 60 * 1000;       // 5h
     const ERROR_CACHE_TTL = 2 * 60 * 60 * 1000; // 2h
-    const SUCCESS_CACHE_TTL = 5 * 24 * 60 * 60 * 1000; // 5d
 
     const CSS_PREFIX = 'p1mip2';
     const INDICATOR_SELECTOR = `.${CSS_PREFIX}-indicator`;
+
+    // Configuration Constants
+    const CONFIG = {
+        RENDER_DELAY: 260,
+        INITIAL_RENDER_DELAY: 280,
+        INITIAL_ITEM_BATCH: 12,
+        SEARCH_DEBOUNCE_MS: 500,
+        BATCH_DELAY_MS: 20
+    };
+
     const P1MIP2 = {
         indicator: `${CSS_PREFIX}-indicator`,
         prefix: `${CSS_PREFIX}-prefix`,
@@ -53,14 +62,14 @@ the GNU General Public License as published by the Free Software Foundation, eit
     };
 
     const STATUS_SYMBOL = {
-        available: '&#x2714;', // Checkmark ✓
-        partial: '&#x25D0;',   // Half-filled circle ◐
-        unavailable: '&#x2716;', // Cross X ✖
-        error: '&#x3F;',       // Question ?
-        loading: '&#x23F1;',   // Timer ⏱
+        available:   '&#x2714;', // ✓
+        partial:     '&#x25D0;', // ◐
+        unavailable: '&#x2716;', // ✖
+        error:       '&#x3F;',   // ?
+        loading:     '&#x23F1;', // ⏱
     };
 
-    // --- Styles for Indicators & Tooltips ---
+    // --- Styles ---
     const style = document.createElement('style');
     style.textContent = `
         .${P1MIP2.indicator} {
@@ -73,19 +82,15 @@ the GNU General Public License as published by the Free Software Foundation, eit
             display: inline-flex; align-items: center; gap: 2px;
             min-width: 55px; justify-content: center;
         }
-
         .${P1MIP2.prefix} { color: #fff; margin-right: 2px; }
-
         .${P1MIP2.icon} { font-size: 12px; font-weight: 700; line-height: 1; }
         .${P1MIP2.link} { color: #4aa4ff; font-size: 12px; line-height: 1; text-decoration: none; margin-left: 4px; }
         .${P1MIP2.link}:hover { text-decoration: underline; }
-
         .${P1MIP2.status.available}.${P1MIP2.icon} { color: #50C878 !important; }
         .${P1MIP2.status.partial}.${P1MIP2.icon} { color: #FFB347 !important; }
         .${P1MIP2.status.unavailable}.${P1MIP2.icon} { color: #FF4136 !important; }
         .${P1MIP2.status.error}.${P1MIP2.icon} { color: #FFD700 !important; }
         .${P1MIP2.status.loading}.${P1MIP2.icon} { color: #FFFFFF !important; }
-
         .${P1MIP2.tooltip} {
             visibility: hidden; width: max-content;
             background-color: #1a1a1a; color: #fff;
@@ -103,7 +108,6 @@ the GNU General Public License as published by the Free Software Foundation, eit
             margin-left: -4px; border-width: 4px; border-style: solid;
             border-color: #1a1a1a transparent transparent transparent;
         }
-
         .${P1MIP2.popupWrapper} {
             position: absolute; top: 50%; display: inline-flex;
             align-items: center; gap: 4px;
@@ -111,41 +115,36 @@ the GNU General Public License as published by the Free Software Foundation, eit
             pointer-events: none; z-index: 10001;
             min-width: 100px; max-width: 280px;
         }
-
         .${P1MIP2.indicator}.${P1MIP2.modalIndicator} {
             position: static; top: auto; right: auto;
             min-width: auto; padding: 1px 6px;
             white-space: nowrap;
         }
-
         .${P1MIP2.popupCostOverlay} {
             position: absolute; top: 0; right: calc(100% + 10px);
             z-index: 10000; pointer-events: auto;
             display: inline-flex; align-items: center; gap: 4px;
         }
-
-        .${P1MIP2.popupCostOverlay} .${P1MIP2.indicator} {
-            pointer-events: auto;
-        }
+        .${P1MIP2.popupCostOverlay} .${P1MIP2.indicator} { pointer-events: auto; }
     `;
     document.head.appendChild(style);
 
-    const ITEM_SELECTOR = '.shopItemBase.shopItem, .shopItemBase.shopItemPackage, .shopItem, .shopItemPackage';
+    // Selectors
+    // Fallback added: .shop-item is sometimes used in newer layouts or A/B tests
+    const ITEM_SELECTOR = '.shopItemBase.shopItem, .shopItemBase.shopItemPackage, .shopItem, .shopItemPackage, .shop-item';
     const POPUP_MODAL_SELECTOR = '#cboxContent .shopBuyItemModal';
     const POPUP_LINEITEM_SELECTOR = '.lineItems .lineItem[data-id]';
     const POPUP_SINGLE_ITEM_SELECTOR = '.content .costRow .totalCost';
-    const ITEM_RENDER_DELAY = 260;
-    const INITIAL_RENDER_DELAY = 280;
-    const INITIAL_ITEM_BATCH = 12;
 
     let observer = null;
     let pendingQueue = [];
     let batchTimeout = null;
     let lastTrackedInfo = '';
     let lastSearchQuery = location.search;
+    let searchResetTimer = null; // Debounce timer for search changes
     const pendingRenderTimeouts = new WeakMap();
 
-    // --- Local Storage Cache Helpers ---
+    // --- Cache Helpers ---
 
     /**
      * Reads a cached item result from localStorage.
@@ -164,7 +163,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
             }
             return data;
         } catch (e) {
-            console.error('[PoE1-MTX-In-PoE2-Helper] Cache read error:', e);
+            console.warn('[PoE1-MTX-In-PoE2-Helper] Cache read error:', e);
             return null;
         }
     }
@@ -179,7 +178,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
      */
     function setCache(id, status, detail, errorLocation = null, poe2Link = null) {
         try {
-            const ttl = status === 'error' ? ERROR_CACHE_TTL : SUCCESS_CACHE_TTL;
+            const ttl = status === 'error' ? ERROR_CACHE_TTL : CACHE_TTL;
             localStorage.setItem(CACHE_KEY + id, JSON.stringify({
                 timestamp: Date.now(), ttl, status, detail, errorLocation, poe2Link
             }));
@@ -188,23 +187,8 @@ the GNU General Public License as published by the Free Software Foundation, eit
         }
     }
 
-    /**
-     * Returns the symbol to render for a given availability status.
-     * @param {string} status One of 'available', 'partial', 'unavailable', 'error', or 'loading'.
-     * @returns {string} The HTML entity for the status icon.
-     */
-    function getStatusSymbol(status) {
-        return STATUS_SYMBOL[status] || STATUS_SYMBOL.loading;
-    }
-
-    /**
-     * Returns the CSS class for the given status.
-     * @param {string} status Availability status.
-     * @returns {string} The CSS class name for the icon state.
-     */
-    function getStatusClass(status) {
-        return P1MIP2.status[status] || P1MIP2.status.loading;
-    }
+    function getStatusSymbol(status) { return STATUS_SYMBOL[status] || STATUS_SYMBOL.loading; }
+    function getStatusClass(status) { return P1MIP2.status[status] || P1MIP2.status.loading; }
 
     /**
      * Builds the tooltip text for a rendered status indicator.
@@ -215,18 +199,14 @@ the GNU General Public License as published by the Free Software Foundation, eit
      */
     function buildTooltipText(status, detail, errorLocation = null) {
         switch (status) {
-            case 'available':
-                return detail || 'Available in PoE2';
-            case 'partial':
-                return detail || 'Partially available';
-            case 'unavailable':
-                return detail || 'Not available in PoE2';
+            case 'available': return detail || 'Available in PoE2';
+            case 'partial': return detail || 'Partially available';
+            case 'unavailable': return detail || 'Not available in PoE2';
             case 'error': {
                 const prefix = errorLocation ? `Error at: ${errorLocation}` : 'Unknown error';
                 return `${prefix}\n${detail || ''}`.trim();
             }
-            default:
-                return 'Checking availability...';
+            default: return 'Checking availability...';
         }
     }
 
@@ -261,10 +241,18 @@ the GNU General Public License as published by the Free Software Foundation, eit
             ${poe2Link ? `<a class="${P1MIP2.link}" href="${poe2Link}" target="_blank" rel="noopener noreferrer" title="View on PoE2DB" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">&#x2197;</a>` : ''}
             <div class="${P1MIP2.tooltip}">${tooltipText}</div>
         `;
-
         return span;
     }
 
+    /**
+     * Creates the availability overlay indicator for a popup shop item with multiple PoE2 links.
+     * @param {string} status One of 'available', 'partial', 'unavailable', 'error', or 'loading'.
+     * @param {string|null} detail Tooltip detail text.
+     * @param {string|null} errorLocation Optional error location text.
+     * @param {string[]} poe2Links Array of PoE2 URLs to link.
+     * @param {string} extraClass Additional CSS class for the indicator.
+     * @returns {HTMLElement} The rendered indicator element.
+     */
     function createPopupIndicator(status, detail, errorLocation = null, poe2Links = [], extraClass = '') {
         const span = document.createElement('span');
         span.className = `${P1MIP2.indicator} ${extraClass}`.trim();
@@ -285,7 +273,6 @@ the GNU General Public License as published by the Free Software Foundation, eit
             ${linksHtml}
             <div class="${P1MIP2.tooltip}">${tooltipText}</div>
         `;
-
         return span;
     }
 
@@ -368,11 +355,10 @@ the GNU General Public License as published by the Free Software Foundation, eit
         ids = normalizeIds(ids);
 
         if (ids.length === 0) {
-            const errorMsg = type === 'PACK'
-                ? 'Pack contains no valid component IDs'
-                : type === 'VARIANT'
-                    ? 'Variant contains no valid IDs'
+            const errorMsg = type === 'PACK' ? 'Pack contains no valid component IDs'
+                : type === 'VARIANT' ? 'Variant contains no valid IDs'
                     : 'No valid ID found';
+
             console.warn('[PoE1-MTX-In-PoE2-Helper] skipping fetch due to empty ids', { itemId, type, ids });
             setCache(itemId, 'error', errorMsg, 'Item Extraction');
             renderIndicator(itemDiv, 'error', errorMsg, 'Item Extraction', null);
@@ -391,15 +377,15 @@ the GNU General Public License as published by the Free Software Foundation, eit
      * @param {string[]} ids The worker IDs to fetch.
      * @param {string} targetId The item element ID.
      * @param {'PACK'|'VARIANT'|'SINGLE'} type The item type.
+     * @param {HTMLElement|null} popupTarget The optional popup target element.
+     * @param {string} popupExtraClass Additional CSS class for the popup.
      */
     function queueFetch(ids, targetId, type, popupTarget = null, popupExtraClass = '') {
         const componentMap = (type === 'PACK' || type === 'VARIANT') ? ids : null;
-
         pendingQueue.push({ ids: [...ids], targetId, type, componentMap, popupTarget, popupExtraClass });
-        console.log('[PoE1-MTX-In-PoE2-Helper] queued fetch for item', targetId, 'ids', ids, 'type', type);
 
         if (batchTimeout) clearTimeout(batchTimeout);
-        batchTimeout = setTimeout(processBatchQueue, 20);
+        batchTimeout = setTimeout(processBatchQueue, CONFIG.BATCH_DELAY_MS);
     }
 
     /**
@@ -412,13 +398,11 @@ the GNU General Public License as published by the Free Software Foundation, eit
         if (target.type === 'SINGLE') {
             return resultMap[target.targetId]?.checkedUrl || null;
         }
-
         if (target.type === 'PACK' || target.type === 'VARIANT') {
             const compIds = target.componentMap || [];
             const compResults = compIds.map(id => resultMap[id]).filter(Boolean);
             return compResults[0]?.checkedUrl || null;
         }
-
         return null;
     }
 
@@ -437,16 +421,11 @@ the GNU General Public License as published by the Free Software Foundation, eit
             allIds.forEach(id => params.append('ids', id));
             const workerUrl = `${WORKER_URL}?${params.toString()}`;
 
-            console.log('[PoE1-MTX-In-PoE2-Helper] worker fetch batch for items', batches.map(b => b.targetId), 'workerUrl', workerUrl, 'ids', allIds);
             const res = await fetch(workerUrl);
-
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
             const data = await res.json();
             const results = Array.isArray(data) ? data : [data];
-
             const resultMap = {};
             results.forEach(r => resultMap[r.id] = r);
 
@@ -476,35 +455,24 @@ the GNU General Public License as published by the Free Software Foundation, eit
                 } else if (batch.type === 'PACK' || batch.type === 'VARIANT') {
                     const compIds = batch.componentMap || [];
                     const compResults = compIds.map(id => resultMap[id]).filter(Boolean);
-
                     const availCount = compResults.filter(r => !r.error && r.available).length;
                     const total = compResults.length;
 
                     if (total === 0) {
                         finalStatus = 'error';
                         errorLocation = batch.type === 'VARIANT' ? 'Variant Components' : 'Pack Components';
-                        detail = batch.type === 'VARIANT'
-                            ? 'No variants extracted from item'
-                            : 'No components extracted from pack';
+                        detail = batch.type === 'VARIANT' ? 'No variants extracted from item' : 'No components extracted from pack';
                     } else if (availCount === total) {
                         finalStatus = 'available';
-                        detail = batch.type === 'VARIANT'
-                            ? `All ${total} variants available in PoE2`
-                            : `All ${total} items available in PoE2`;
+                        detail = `All ${total} items available in PoE2`;
                     } else if (availCount > 0) {
                         finalStatus = 'partial';
-                        detail = batch.type === 'VARIANT'
-                            ? `${availCount}/${total} variants available in PoE2`
-                            : `${availCount}/${total} items available in PoE2`;
+                        detail = `${availCount}/${total} items available in PoE2`;
                     } else {
                         finalStatus = 'unavailable';
-                        detail = batch.type === 'VARIANT'
-                            ? `None of the ${total} variants available in PoE2`
-                            : `None of the ${total} items available in PoE2`;
+                        detail = `None of the ${total} items available in PoE2`;
                     }
                 }
-
-                setCache(batch.targetId, finalStatus, detail, errorLocation);
 
                 const poe2Link = getPoe2LinkFromWorkerResult(batch, resultMap);
                 setCache(batch.targetId, finalStatus, detail, errorLocation, poe2Link);
@@ -515,6 +483,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
                     if (loader) loader.remove();
                     renderIndicator(item, finalStatus, detail, errorLocation, poe2Link);
                 }
+
                 if (batch.popupTarget && document.contains(batch.popupTarget)) {
                     const poe2Links = (batch.type === 'SINGLE')
                         ? (poe2Link ? [poe2Link] : [])
@@ -523,8 +492,8 @@ the GNU General Public License as published by the Free Software Foundation, eit
                 }
             }
         } catch (err) {
+            console.error('[PoE1-MTX-In-PoE2-Helper] Batch fetch failed:', err);
             batches.forEach(batch => {
-                console.error('[PoE1-MTX-In-PoE2-Helper] Batch fetch failed for item', batch.targetId, err);
                 const item = document.getElementById(batch.targetId);
                 if (item) {
                     const loader = item.querySelector(INDICATOR_SELECTOR);
@@ -540,9 +509,6 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Determines where in the process an error occurred based on debug info
-     */
-    /**
      * Maps worker debug reasons to a readable error location.
      * @param {string|null} reason The worker debug reason.
      * @param {number} httpStatus The HTTP status code returned by the worker.
@@ -550,24 +516,15 @@ the GNU General Public License as published by the Free Software Foundation, eit
      */
     function determineErrorLocation(reason, httpStatus) {
         if (!reason) return 'Unknown';
-
         switch (reason) {
-            case 'network_error':
-                return 'Network Connection';
-            case 'http_error':
-                return `Poe2db (${httpStatus})`;
-            case 'tab_missing':
-                return 'Poe2db (Tab Not Found)';
-            case 'parse_fail':
-                return 'Poe2db (Parse Failure)';
-            default:
-                return reason;
+            case 'network_error': return 'Network Connection';
+            case 'http_error': return `Poe2db (${httpStatus})`;
+            case 'tab_missing': return 'Poe2db (Tab Not Found)';
+            case 'parse_fail': return 'Poe2db (Parse Failure)';
+            default: return reason;
         }
     }
 
-    /**
-     * Builds human-readable error message
-     */
     /**
      * Builds a human-readable error message from worker debug info.
      * @param {string} errorMsg The raw error message.
@@ -582,14 +539,6 @@ the GNU General Public License as published by the Free Software Foundation, eit
         return errorMsg || 'Unknown error';
     }
 
-    /**
-     * Updates the visible overlay indicator for an item.
-     * @param {HTMLElement} itemDiv The shop item element.
-     * @param {string} status The status to display.
-     * @param {string} detail Tooltip detail text.
-     * @param {string|null} errorLocation Optional error location.
-     * @param {string|null} poe2Link Optional PoE2 URL.
-     */
     /**
      * Renders an availability overlay on a shop item container.
      * @param {HTMLElement} itemDiv The shop item element.
@@ -627,38 +576,34 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Renders an availability overlay inside a popup target container.
-     * @param {HTMLElement} targetContainer The container element.
-     * @param {string} status Availability status.
+     * Renders an availability overlay on a popup container.
+     * @param {HTMLElement} targetContainer The popup container element.
+     * @param {string} status The status to display.
      * @param {string} detail Tooltip detail text.
-     * @param {string|null} errorLocation Optional error origin.
-     * @param {string|null} poe2Link Optional PoE2 URL.
-     * @param {string} extraClass Additional CSS classes.
+     * @param {string|null} errorLocation Optional error location.
+     * @param {string[]} poe2Links Optional array of PoE2 URLs.
+     * @param {string} extraClass Optional extra CSS class for the indicator.
      */
     function renderPopupIndicator(targetContainer, status, detail, errorLocation = null, poe2Links = [], extraClass = '') {
         removeIndicator(targetContainer);
         const indicator = createPopupIndicator(status, detail, errorLocation, poe2Links, extraClass);
         targetContainer.appendChild(indicator);
 
-        // Ensure the popup indicator and its links receive pointer events
         try {
             indicator.style.pointerEvents = 'auto';
             const anchors = indicator.querySelectorAll('a');
             anchors.forEach(a => {
-                // Prevent clicks from bubbling to modal handlers
                 a.addEventListener('click', (ev) => ev.stopPropagation());
                 a.addEventListener('mousedown', (ev) => ev.stopPropagation());
             });
-        } catch (e) {
-            // ignore
-        }
+        } catch (e) { /* ignore */ }
     }
 
     /**
-     * Checks a single popup line item and renders its availability overlay.
-     * @param {string} itemId The PoE1 item ID.
-     * @param {HTMLElement} targetContainer The DOM container for the overlay.
-     * @param {string} extraClass Additional CSS classes.
+     * Checks the availability of a single popup item.
+     * @param {string} itemId The item identifier.
+     * @param {HTMLElement} targetContainer The popup container element.
+     * @param {string} extraClass Optional extra CSS class for the indicator.
      */
     function checkPopupItem(itemId, targetContainer, extraClass) {
         const cached = getCache(itemId);
@@ -666,64 +611,32 @@ the GNU General Public License as published by the Free Software Foundation, eit
             renderPopupIndicator(targetContainer, cached.status, cached.detail, cached.errorLocation, cached.poe2Link ? [cached.poe2Link] : [], extraClass);
             return;
         }
-
         renderPopupIndicator(targetContainer, 'loading', 'Waiting to check availability...', null, [], extraClass);
         queueFetch([itemId], itemId, 'SINGLE', targetContainer, extraClass);
     }
 
+    /**
+     * Checks the availability of multiple popup items in a modal.
+     * @param {string[]} itemIds The array of item identifiers.
+     * @param {HTMLElement} targetContainer The popup container element.
+     * @param {string} extraClass Optional extra CSS class for the indicator.
+     */
     function checkPopupModalItems(itemIds, targetContainer, extraClass) {
         const cachedResults = itemIds.map(id => getCache(id)).filter(Boolean);
         if (cachedResults.length === itemIds.length) {
             const availCount = cachedResults.filter(r => r.status === 'available').length;
-            const detail = itemIds.length === 1
-                ? cachedResults[0].detail
-                : `${availCount}/${itemIds.length} available in PoE2`;
+            const detail = itemIds.length === 1 ? cachedResults[0].detail : `${availCount}/${itemIds.length} available in PoE2`;
             const poe2Links = cachedResults.map(r => r.poe2Link).filter(Boolean);
-            const status = availCount === itemIds.length ? 'available'
-                : availCount > 0 ? 'partial'
-                    : 'unavailable';
+            const status = availCount === itemIds.length ? 'available' : availCount > 0 ? 'partial' : 'unavailable';
             renderPopupIndicator(targetContainer, status, detail, null, poe2Links, extraClass);
             return;
         }
-
         renderPopupIndicator(targetContainer, 'loading', 'Waiting to check availability...', null, [], extraClass);
         queueFetch(itemIds, itemIds[0], 'PACK', targetContainer, extraClass);
     }
 
     /**
-     * Creates a popup wrapper element for a line-item overlay.
-     * @returns {HTMLElement} The wrapper element.
-     */
-    function createPopupWrapper(useRightSide = true) {
-        const wrapper = document.createElement('span');
-        wrapper.className = P1MIP2.popupWrapper;
-        wrapper.style.position = 'absolute';
-        wrapper.style.display = 'inline-flex';
-        wrapper.style.alignItems = 'center';
-        wrapper.style.gap = '4px';
-        wrapper.style.whiteSpace = 'nowrap';
-        wrapper.style.overflow = 'visible';
-        wrapper.style.pointerEvents = 'none';
-        wrapper.style.zIndex = '10001';
-        wrapper.style.minWidth = useRightSide ? '100px' : '100px';
-        wrapper.style.maxWidth = '260px';
-
-        if (useRightSide) {
-            wrapper.style.top = '0';
-            wrapper.style.left = '50%';
-            wrapper.style.right = 'auto';
-            wrapper.style.transform = 'translate(-50%, -110%)';
-        } else {
-            wrapper.style.top = '50%';
-            wrapper.style.left = '0';
-            wrapper.style.right = 'auto';
-            wrapper.style.transform = 'translate(-12px, -50%)';
-        }
-        return wrapper;
-    }
-
-    /**
-     * Initializes popup modal overlays for pack items and single-item purchases.
+     * Patches all visible popup modals to include availability indicators.
      */
     function patchPopupModals() {
         const modals = document.querySelectorAll(POPUP_MODAL_SELECTOR);
@@ -733,29 +646,15 @@ the GNU General Public License as published by the Free Software Foundation, eit
                 patchPopupPackModal(modalRoot, lineItems);
                 return;
             }
-
             patchPopupSingleItem(modalRoot);
         });
     }
 
     /**
-     * Patches line-item overlays inside pack purchase modals.
-     * @param {NodeListOf<HTMLElement>} lineItems The line items.
+     * Patches a popup modal that contains multiple items to include availability indicators.
+     * @param {HTMLElement} modalRoot The modal root element.
+     * @param {HTMLElement[]} lineItems The array of line item elements within the modal.
      */
-    function findPopupAnchor(lineItem, useRightSide) {
-        if (!useRightSide) return lineItem;
-        const buttonSelectors = ['button', '.buyButton', '.purchase', '.btn', '.shopButton', '.shopBtn', '.buy', '.action'];
-        for (const selector of buttonSelectors) {
-            const button = lineItem.querySelector(selector);
-            if (button) return button;
-        }
-        const actionAreas = lineItem.querySelectorAll('div, span');
-        for (const area of actionAreas) {
-            if (area.textContent && /buy|purchase|add/i.test(area.textContent)) return area;
-        }
-        return lineItem;
-    }
-
     function patchPopupPackModal(modalRoot, lineItems) {
         const itemIds = Array.from(lineItems)
             .map(lineItem => (lineItem.dataset.id || '').trim())
@@ -765,7 +664,6 @@ the GNU General Public License as published by the Free Software Foundation, eit
         const costTarget = modalRoot.querySelector(POPUP_SINGLE_ITEM_SELECTOR);
         if (!costTarget) return;
 
-        // Avoid creating multiple markers if one already exists
         if (costTarget.dataset.p1mip2PopupProcessed) return;
         if (costTarget.querySelector && costTarget.querySelector(`.${P1MIP2.popupCostOverlay}`)) return;
 
@@ -783,37 +681,14 @@ the GNU General Public License as published by the Free Software Foundation, eit
         }
     }
 
-    function patchPopupLineItems(lineItems) {
-        // kept for backward compatibility but not used by modal summary mode.
-        lineItems.forEach((lineItem) => {
-            const existingMarker = lineItem.querySelector(`.${P1MIP2.popupWrapper}`);
-            if (lineItem.dataset.p1mip2PopupProcessed && existingMarker) return;
-
-            lineItem.dataset.p1mip2PopupProcessed = 'true';
-            lineItem.style.position = 'relative';
-            lineItem.style.overflow = 'visible';
-
-            if (existingMarker) existingMarker.remove();
-
-            const marker = createPopupWrapper(true);
-            lineItem.appendChild(marker);
-
-            const itemId = lineItem.dataset.id;
-            if (itemId) {
-                checkPopupItem(itemId, marker, P1MIP2.modalIndicator);
-            }
-        });
-    }
-
     /**
-     * Patches the overlay for a single-item purchase modal.
+     * Patches a popup modal that contains a single item to include an availability indicator.
      * @param {HTMLElement} modalRoot The modal root element.
      */
     function patchPopupSingleItem(modalRoot) {
         const costTarget = modalRoot.querySelector(POPUP_SINGLE_ITEM_SELECTOR);
         if (!costTarget) return;
 
-        // Avoid duplicate markers
         if (costTarget.dataset.p1mip2PopupProcessed) return;
         if (costTarget.querySelector && costTarget.querySelector(`.${P1MIP2.popupCostOverlay}`)) return;
 
@@ -829,8 +704,8 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Repairs a visible item by restoring its overlay when DOM changes remove it.
-     * @param {HTMLElement} itemDiv The shop item element.
+     * Repairs the availability indicator for a visible item.
+     * @param {HTMLElement} itemDiv The item container element.
      */
     function repairVisibleItem(itemDiv) {
         if (!itemDiv.id || !isElementInView(itemDiv)) return;
@@ -841,15 +716,14 @@ the GNU General Public License as published by the Free Software Foundation, eit
             renderIndicator(itemDiv, cached.status, cached.detail, cached.errorLocation, cached.poe2Link);
             return;
         }
-
         delete itemDiv.dataset.processed;
         scheduleItemCheck(itemDiv);
     }
 
     /**
-     * Determines whether an element is currently inside or near the viewport.
-     * @param {HTMLElement} itemDiv The shop item element.
-     * @returns {boolean} True when the item is visible or within 128px of the viewport.
+     * Checks if an element is within the viewport, with a margin.
+     * @param {HTMLElement} itemDiv The item container element.
+     * @returns {boolean} True if the element is in view, false otherwise.
      */
     function isElementInView(itemDiv) {
         const rect = itemDiv.getBoundingClientRect();
@@ -858,8 +732,8 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Cancels a pending item check if it has been scheduled but not yet executed.
-     * @param {HTMLElement} itemDiv The shop item element.
+     * Cancels a scheduled item check.
+     * @param {HTMLElement} itemDiv The item container element.
      */
     function cancelScheduledItemCheck(itemDiv) {
         const timeoutId = pendingRenderTimeouts.get(itemDiv);
@@ -870,8 +744,8 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Schedules a visibility-based PoE2 availability check for a shop item.
-     * @param {HTMLElement} itemDiv The shop item element.
+     * Schedules an item check if it hasn't been processed yet.
+     * @param {HTMLElement} itemDiv The item container element.
      */
     function scheduleItemCheck(itemDiv) {
         if (itemDiv.dataset.processed || pendingRenderTimeouts.has(itemDiv)) return;
@@ -886,13 +760,13 @@ the GNU General Public License as published by the Free Software Foundation, eit
             renderPlaceholder(itemDiv);
             checkItem(itemDiv);
             updateTrackedItemCount();
-        }, ITEM_RENDER_DELAY);
+        }, CONFIG.RENDER_DELAY);
 
         pendingRenderTimeouts.set(itemDiv, timeoutId);
     }
 
     /**
-     * Logs the current shop item tracking counts when they change.
+     * Updates the count of tracked items and logs it if it has changed.
      */
     function updateTrackedItemCount() {
         const totalItems = document.querySelectorAll(ITEM_SELECTOR).length;
@@ -905,100 +779,85 @@ the GNU General Public License as published by the Free Software Foundation, eit
     }
 
     /**
-     * Detects search query changes by comparing the current location.search.
+     * Handles search query changes and resets tracking if necessary.
      */
-    function resetTrackingForSearch() {
-        if (batchTimeout) {
-            clearTimeout(batchTimeout);
-            batchTimeout = null;
-        }
-        pendingQueue = [];
+    function handleSearchChange() {
+        if (searchResetTimer) clearTimeout(searchResetTimer);
+        searchResetTimer = setTimeout(() => {
+            const currentSearch = location.search;
+            const wasSearching = lastSearchQuery.includes('search=');
+            const isSearching = currentSearch.includes('search=');
 
-        document.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
-            cancelScheduledItemCheck(item);
-            delete item.dataset.processed;
-            const existing = item.querySelector(INDICATOR_SELECTOR);
-            if (existing) existing.remove();
-        });
+            if (wasSearching !== isSearching || currentSearch !== lastSearchQuery) {
+                console.log('[PoE1-MTX-In-PoE2-Helper] Search change detected, resetting tracking.');
 
-        const visibleItems = Array.from(document.querySelectorAll(ITEM_SELECTOR)).filter(isElementInView);
-        visibleItems.forEach((item) => {
-            if (!item.dataset.processed) {
-                scheduleItemCheck(item);
+                if (batchTimeout) clearTimeout(batchTimeout);
+                batchTimeout = null;
+                pendingQueue = [];
+
+                document.querySelectorAll(ITEM_SELECTOR).forEach((item) => {
+                    cancelScheduledItemCheck(item);
+                    delete item.dataset.processed;
+                    const existing = item.querySelector(INDICATOR_SELECTOR);
+                    if (existing) existing.remove();
+                });
+
+                const visibleItems = Array.from(document.querySelectorAll(ITEM_SELECTOR)).filter(isElementInView);
+                visibleItems.forEach((item) => {
+                    if (!item.dataset.processed) scheduleItemCheck(item);
+                });
+
+                updateTrackedItemCount();
+                lastSearchQuery = currentSearch;
             }
-        });
-
-        updateTrackedItemCount();
-    }
-
-    function detectSearchChange() {
-        const currentSearch = location.search;
-        if (currentSearch !== lastSearchQuery) {
-            if (currentSearch.includes('search=')) {
-                console.log('[PoE1-MTX-In-PoE2-Helper] Search detected:', currentSearch);
-                resetTrackingForSearch();
-            } else if (lastSearchQuery.includes('search=')) {
-                console.log('[PoE1-MTX-In-PoE2-Helper] Search cleared:', currentSearch);
-                resetTrackingForSearch();
-            }
-            lastSearchQuery = currentSearch;
-        }
+        }, CONFIG.SEARCH_DEBOUNCE_MS);
     }
 
     /**
-     * Watches the page for newly inserted shop items and search changes.
+     * Initializes the mutation observer to track added/removed items in the DOM.
      */
     function initMutationObserver() {
         const root = document.body;
-
         const mutationObserver = new MutationObserver((mutations) => {
-            detectSearchChange();
-            let observedNew = false;
+            handleSearchChange(); // Debounced check
+
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType !== Node.ELEMENT_NODE) return;
-                    if (node.matches && node.matches(ITEM_SELECTOR)) {
-                        if (!node.dataset.processed) {
-                            observer.observe(node);
-                            observedNew = true;
-                            if (isElementInView(node)) {
-                                scheduleItemCheck(node);
-                            }
-                        }
+
+                    // Direct match
+                    if (node.matches && node.matches(ITEM_SELECTOR) && !node.dataset.processed) {
+                        observer.observe(node);
+                        if (isElementInView(node)) scheduleItemCheck(node);
                     }
+
+                    // Descendants
                     if (node.querySelectorAll) {
                         const items = node.querySelectorAll(ITEM_SELECTOR);
                         items.forEach((item) => {
                             if (!item.dataset.processed) {
                                 observer.observe(item);
-                                observedNew = true;
-                                if (isElementInView(item)) {
-                                    scheduleItemCheck(item);
-                                }
+                                if (isElementInView(item)) scheduleItemCheck(item);
                             }
                         });
                     }
                 });
             });
 
+            // Repair existing overlays that might have been removed by DOM refresh
             Array.from(document.querySelectorAll(ITEM_SELECTOR))
                 .filter(isElementInView)
                 .forEach(repairVisibleItem);
 
-            if (observedNew) updateTrackedItemCount();
             patchPopupModals();
         });
 
-        mutationObserver.observe(root, {
-            childList: true,
-            subtree: true,
-        });
+        mutationObserver.observe(root, { childList: true, subtree: true });
     }
 
-    // --- Intersection Observer Setup ---
-
     /**
-     * Initializes the intersection and mutation observers for shop items.
+     * Initializes the intersection observer for tracking item visibility.
+     * @returns {Promise<void>}
      */
     async function initObserver() {
         const items = Array.from(document.querySelectorAll(ITEM_SELECTOR));
@@ -1007,8 +866,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     const el = entry.target;
-                    if (el.dataset.processed) return;
-                    scheduleItemCheck(el);
+                    if (!el.dataset.processed) scheduleItemCheck(el);
                 }
             });
         }, { rootMargin: '200px', threshold: 0.01 });
@@ -1016,15 +874,14 @@ the GNU General Public License as published by the Free Software Foundation, eit
         const visibleItems = items.filter(isElementInView);
         visibleItems.forEach((item, index) => {
             if (!item.dataset.processed) {
-                if (index < INITIAL_ITEM_BATCH) {
+                if (index < CONFIG.INITIAL_ITEM_BATCH) {
                     scheduleItemCheck(item);
                 } else {
-                    const timeoutId = setTimeout(() => scheduleItemCheck(item), INITIAL_RENDER_DELAY);
+                    const timeoutId = setTimeout(() => scheduleItemCheck(item), CONFIG.INITIAL_RENDER_DELAY);
                     pendingRenderTimeouts.set(item, timeoutId);
                 }
             }
         });
-        updateTrackedItemCount();
 
         items.forEach(item => {
             if (!item.dataset.processed) observer.observe(item);
@@ -1032,24 +889,24 @@ the GNU General Public License as published by the Free Software Foundation, eit
 
         initMutationObserver();
         patchPopupModals();
-        detectSearchChange();
-
+        lastSearchQuery = location.search;
         console.log('[PoE1-MTX-In-PoE2-Helper] initialized');
     }
 
-    // --- Initialization ---
-
     /**
-     * Delays initialization until the page load and initial DOM are fully ready.
+     * Initializes the helper after the page has loaded.
      */
     function initializeAfterPageLoad() {
         if (document.readyState === 'complete') {
             initObserver();
         } else {
-            window.addEventListener('load', () => setTimeout(initObserver, INITIAL_RENDER_DELAY));
+            window.addEventListener('load', () => setTimeout(initObserver, CONFIG.INITIAL_RENDER_DELAY));
         }
     }
 
+    /**
+     * Entry point for the helper script.
+     */
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initializeAfterPageLoad);
     } else {
