@@ -108,7 +108,7 @@ export default {
 	 * @returns {Object} - Result object with found, available, and debug info
 	 */
 	async fetchAndParseOne(id) {
-		const dbUrl = derivePoe2DBLink(id);
+		const dbUrl = generateStandardSlug(id);
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
@@ -123,7 +123,7 @@ export default {
 
 		try {
 			// Request the PoE2DB page for this item with a timeout
-			const res = await fetch(dbUrl, {
+			let res = await fetch(dbUrl, {
 				signal: controller.signal,
 				headers: {
 					'User-Agent': 'PoE1-MTX-In-PoE2-Cacher',
@@ -132,6 +132,27 @@ export default {
 			});
 
 			result.debug.httpStatus = res.status;
+
+			// Try again if there's a stop-word slug variant (e.g. "Blightborn_Bow_and_Quiver" instead of "Blightborn_Bow_And_Quiver")
+			const altUrl = generateStopWordSlug(id);
+			if (res.status === 404 && altUrl !== dbUrl) {
+				result.debug.altCheckedUrl = true;
+
+				const altRes = await fetch(altUrl, {
+					signal: controller.signal,
+					headers: {
+						'User-Agent': 'PoE1-MTX-In-PoE2-Cacher',
+						'Accept': 'text/html'
+					}
+				});
+
+				result.debug.altHttpStatus = altRes.status;
+
+				if (altRes.ok) {
+					res = altRes;
+					result.checkedUrl = altUrl;
+				}
+			}
 
 			// Fail if we get a non-200 response
 			if (!res.ok) {
@@ -200,8 +221,46 @@ export default {
 	}
 };
 
-function derivePoe2DBLink(id) {
-	// Converts CamelCase IDs like "FleshGlass" to Flesh_Glass for the URL slug
+/**
+ * List of words that should almost always be lowercase in PoE2DB slugs.
+ * Add more here if you find specific patterns failing.
+ * (thanks "blightborn bow and quiver")
+ */
+const SLUG_STOP_WORDS = new Set([
+	'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+	'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were',
+	'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+	'would', 'could', 'should', 'may', 'might', 'must', 'shall',
+	'the', 'a', 'an', 'this', 'that', 'these', 'those'
+]);
+
+/**
+ * Generates a URL slug from an ID using standard CamelCase splitting.
+ * @param {string} id - The raw item ID.
+ * @returns {string} The generated slug.
+ */
+function generateStandardSlug(id) {
+	// Split CamelCase: "BlightbornBowAndQuiver" -> "Blightborn_Bow_And_Quiver"
 	const slug = id.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/^./, c => c.toUpperCase());
+	return `${POE2DB_BASE}${slug}`;
+}
+
+/**
+ * Generates a URL slug by forcing specific stop words to lowercase.
+ * e.g., "Bow And Quiver" -> "Bow_and_Quiver"
+ * @param {string} id - The raw item ID.
+ * @returns {string} The normalized slug.
+ */
+function generateStopWordSlug(id) {
+	const words = id.replace(/([a-z])([A-Z])/g, '$1 $2').split(/\s+/);
+
+	// Lowercase stop words
+	const normalizedWords = words.map(word => {
+		const lower = word.toLowerCase();
+		return SLUG_STOP_WORDS.has(lower) ? lower : word;
+	});
+
+	// Reform slug
+	const slug = normalizedWords.join('_');
 	return `${POE2DB_BASE}${slug}`;
 }
