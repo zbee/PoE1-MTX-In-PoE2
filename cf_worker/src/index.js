@@ -148,38 +148,48 @@ export default {
 			// Find where the mtx tab starts
 			const hashFragment = `${id}Microtransaction`;
 			const tabStart = html.indexOf(`id="${hashFragment}"`);
+
+			// Found the tab we want (most shop items)
+			if (tabStart !== -1) {
+				// Build context of just the HTML of the tab we want
+				const contextWindow = 8192;
+				const context = html.substring(tabStart, Math.min(tabStart + contextWindow, html.length));
+				result.debug.contextScanned = true;
+
+				match = context.match(poe2Regex);
+
+				// Early return on success
+				if (match) {
+					const val = match[1].trim();
+					result.debug.parsedValue = val;
+					result.available = (val === '1');
+					result.debug.reason = result.available ? 'available' : 'not_available';
+					return result;
+				}
+
+				// Fall through to full page search, note the failure
+				result.debug.contextFail = true;
+			}
+
+			// Search the whole page (usually only PoE2-exclusive items [like from your watchlist])
+			result.debug.fullPageSearch = true;
+			match = html.match(poe2Regex);
+			if (match) {
+				const val = match[1].trim();
+				result.debug.parsedValue = val;
+				result.available = (val === '1');
+				result.debug.reason = result.available ? 'available' : 'not_available';
+			} else {
+				result.debug.regexMatch = false;
+				result.error = 'PoE2 row not found';
+				result.debug.reason = 'parse_fail';
+			}
 			// Fail if not found
 			if (tabStart === -1) {
 				result.debug.tab_found = false;
 				result.error = 'Tab not found';
 				result.debug.reason = 'tab_missing';
 				return result;
-			}
-
-			// Build context of just the HTML of the tab we want
-			const contextWindow = 8192;
-			const context = html.substring(tabStart, Math.min(tabStart + contextWindow, html.length));
-			result.debug.contextScanned = true;
-
-			// Regex looks for: <td>Path of Exile 2</td> ... <td>Value</td>
-			const poe2RowRegex = /<td[^>]*>Path of Exile 2<\/td>\s*<td[^>]*>([^<]*)<\/td>/i;
-			const match = context.match(poe2RowRegex);
-
-			if (match) {
-				const val = match[1].trim();
-				result.debug.parsedValue = val;
-				result.available = (val === '1');
-				result.debug.reason = result.available ? 'available' : 'not_available';
-
-				console.log(`[Worker] Parsed ID: ${id}, Value: '${val}', Available: ${result.available}`);
-			} else {
-				result.debug.regexMatch = false;
-				result.error = 'PoE2 row not found';
-				result.debug.reason = 'parse_fail';
-
-				// Log the failure context snippet for debugging
-				const lastFewChars = context.slice(-50);
-				console.warn(`[Worker] Failed to parse PoE2 row for ${id}. Last 50 chars: ${lastFewChars}`);
 			}
 		} catch (err) {
 			result.error = err.message;
