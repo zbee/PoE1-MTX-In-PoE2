@@ -116,6 +116,7 @@ export default {
 			id,
 			found: false,
 			available: false,
+			error: null,
 			checkedUrl: dbUrl,
 			timestamp: Date.now(),
 			debug: {

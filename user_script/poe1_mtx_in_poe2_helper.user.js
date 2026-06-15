@@ -463,7 +463,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
                 } else if (batch.type === 'PACK' || batch.type === 'VARIANT') {
                     const compIds = batch.componentMap || [];
                     const compResults = compIds.map(id => resultMap[id]).filter(Boolean);
-                    const availCount = compResults.filter(r => !r.error && r.available).length;
+                    const availCount = compResults.filter(r => r.error !== true && r.available).length;
                     const total = compResults.length;
 
                     if (total === 0) {
