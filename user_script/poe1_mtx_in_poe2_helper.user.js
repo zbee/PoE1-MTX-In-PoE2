@@ -131,7 +131,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
 
     // Selectors
     // Fallback added: .shop-item is sometimes used in newer layouts or A/B tests
-    const ITEM_SELECTOR = '.shopItemBase.shopItem, .shopItemBase.shopItemPackage, .shopItem, .shopItemPackage, .shop-item';
+    const ITEM_SELECTOR = '.shopItemBase.shopItem:not(.guild), .shopItemBase.shopItemPackage:not(.guild), .shopItem:not(.guild), .shopItemPackage:not(.guild), .shop-item:not(.guild)';
     const POPUP_MODAL_SELECTOR = '#cboxContent .shopBuyItemModal';
     const POPUP_LINEITEM_SELECTOR = '.lineItems .lineItem[data-id]';
     const POPUP_SINGLE_ITEM_SELECTOR = '.content .costRow .totalCost';
@@ -336,14 +336,21 @@ the GNU General Public License as published by the Free Software Foundation, eit
     async function checkItem(itemDiv) {
         const itemId = itemDiv.id;
         const cached = getCache(itemId);
+
+        // Skip all guild items
+        if (itemDiv.classList.contains('guild')) {
+            console.log('[PoE1-MTX-In-PoE2-Helper] skipping guild item:', itemId);
+            return;
+        }
+        // Return cached data if still valid
         if (cached) {
             renderIndicator(itemDiv, cached.status, cached.detail, cached.errorLocation, cached.poe2Link);
             return;
         }
 
+        // Detect the type of shop entry this is
         const type = detectItemType(itemDiv);
         let ids = [];
-
         if (type === 'PACK') {
             ids = getPackComponents(itemDiv);
         } else if (type === 'VARIANT') {
@@ -354,6 +361,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
 
         ids = normalizeIds(ids);
 
+        // Fail out if the detected IDs are invalid after normalization
         if (ids.length === 0) {
             const errorMsg = type === 'PACK' ? 'Pack contains no valid component IDs'
                 : type === 'VARIANT' ? 'Variant contains no valid IDs'
