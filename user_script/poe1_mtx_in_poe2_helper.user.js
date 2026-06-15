@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PoE1 MTX In PoE2 Helper
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Displays PoE2 availability for each item in the PoE1 item shop.
 // @author       Ethan Henderson (zbee)
 // @match        https://www.pathofexile.com/shop/category/*
