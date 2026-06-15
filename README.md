@@ -113,6 +113,9 @@ individual changes (though not entire additions), and am personally using it.
 
 (for context, this was developed over a couple of days, not in a few prompts)
 
+Changes since 1.0 have been human coding, with only AI assistance and
+auto-completions.
+
 ---
 
 ## 📄 License
