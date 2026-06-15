@@ -43,6 +43,7 @@ The `.user.js` file runs locally in your browser when you visit `pathofexile.com
 - **Overlay:** It injects CSS indicators (✓, ◐, ✖, ?, ⏱) indicating if the item is available in PoE2.
 - **Lazy Loading:** It only checks items currently visible on screen to keep your browser responsive.
 - **Local Caching:** It stores results in `localStorage` (for a few hours) so checking the same page again is much more instant.
+- **Change Detection:** It scans for DOM changes, and will update in kind, such as when you search on the shop.
 
 ### 2. The Proxy Worker (Cloudflare)
 When the script encounters an unchecked microtransaction ID, it queries the
@@ -51,6 +52,18 @@ Cloudflare Worker at `p1mip2.zbee.codes`.
   - **Stability:** PoE2DB can be flaky or slow, and the data isn't changing that fast. If it bogs down, the Worker returns cached data.
   - **Performance:** Batching requests allows us to fetch multiple IDs in a single round-trip.
   - **Rate Limiting Protection:** Instead of your computer sending 50 requests per minute to poe2db.tw (which could get you IP-blocked), the Worker manages that traffic centrally.
+
+---
+
+## 🤔 What's missing?
+
+- Currently this was only built out for the amor section of the shop.
+  - It doesn't rule out other types of items, or even try (like skill effects of any nature in PoE1 won't work in 2, obviously)
+- It was only tested on the English shop, and with English PoE2DB.
+  - The version of PoE2DB shouldn't matter, that can stay hard-coded to English forever, doesn't affect the user at all.
+  - But for other languages of the PoE shop? That's more of an issue, no clue if it would work or not.
+- Supporter packs are not supported at all either.
+  - Really the same as the first point, but is something I would like to specifically have working.
 
 ---
 
