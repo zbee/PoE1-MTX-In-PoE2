@@ -111,7 +111,7 @@ I wouldn't say it was vibe-coded, but it was more AI than I have used on other
 projects for sure; I did still test all of the output extensively, reviewed
 individual changes (though not entire additions), and am personally using it.
 
-(for context, this was developed over a couple of days, not in a few prompts)
+(for context, 1.0 was developed over a couple of days, not in a few prompts)
 
 Changes since 1.0 have been human coding, with only AI assistance and
 auto-completions.
