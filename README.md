@@ -10,6 +10,15 @@ indicating its status in PoE2 by checking PoE2DB.
 
 ![Purchase Modal View](./assets/purchase-popup.png)
 
+> This isn't any sort of a hack, or anything, just makes it simpler to know
+> which PoE1 items will work in 2.
+> 
+> The *ONLY* data taken from the shop and used anywhere else in this project is
+> the IDs for the items.
+>
+> This won't make your shop purchases free, it doesn't even load on checkout
+> pages, nothing like either of those things.
+
 ---
 
 ## 🚀 Install
