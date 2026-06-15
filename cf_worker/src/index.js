@@ -88,12 +88,13 @@ export default {
 					continue;
 				}
 			}
-			uncachedIds.push(id);
+			uncachedIds.push({id, url: cached ? cached.checkedUrl : null });
 		}
 
 		// Fetch uncached IDs all at once, and cache them
 		if (uncachedIds.length > 0) {
-			const fresh = await Promise.all(uncachedIds.map(id => this.fetchAndParseOne(id)));
+			const fresh = await Promise.all(uncachedIds
+				.map(({id, url}) => this.fetchAndParseOne(id, url)));
 			Promise.all(fresh.map(r => env.POE_DB_CACHE.put(r.id, JSON.stringify(r))));
 			cachedResults.push(...fresh);
 		}
@@ -105,10 +106,11 @@ export default {
 	/**
 	 * Fetches and parses poe2db using Regex
 	 * @param {string} id - The MTX ID to check
+	 * @param {string} url - The URL to fetch (for outdated cache entries)
 	 * @returns {Object} - Result object with found, available, and debug info
 	 */
-	async fetchAndParseOne(id) {
-		const dbUrl = generateStandardSlug(id);
+	async fetchAndParseOne(id, url) {
+		const dbUrl = url || generateStandardSlug(id);
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
