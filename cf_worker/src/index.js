@@ -19,7 +19,7 @@ const CORS_HEADERS = {
 	'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 	'Access-Control-Allow-Headers': 'Content-Type',
 	'Content-Type': 'application/json',
-	'Cache-Control': `public, max-age=${CACHE_TTL_ERROR}`
+	'Cache-Control': `public, max-age=60`
 };
 
 export default {
