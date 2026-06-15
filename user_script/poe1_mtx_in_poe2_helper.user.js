@@ -26,7 +26,7 @@ the GNU General Public License as published by the Free Software Foundation, eit
     'use strict';
 
     const WORKER_URL = 'https://p1mip2.zbee.codes';
-    const CACHE_KEY = 'poe1_mtx_v2_';
+    const CACHE_KEY = 'poe1_mtx_';
     const CACHE_TTL = 5 * 60 * 60 * 1000; // default 5h fallback
     const ERROR_CACHE_TTL = 2 * 60 * 60 * 1000; // 2h
     const SUCCESS_CACHE_TTL = 5 * 24 * 60 * 60 * 1000; // 5d
