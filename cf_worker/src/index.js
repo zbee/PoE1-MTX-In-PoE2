@@ -69,6 +69,10 @@ export default {
 	/**
 	 * Handles caching and fetching for a batch of IDs
 	 * Strategy: Check all cached first -> Fetch missing ones in parallel -> Merge
+	 * @param {string[]} idsToCheck - Array of MTX IDs to check
+	 * @param {Object} env - Cloudflare environment for KV access
+	 * @returns {Object[]} - Array of result objects corresponding to input IDs
+	 * Each result object: { id, found, available, checkedUrl, timestamp, debug, error }
 	 */
 	async processBatch(idsToCheck, env) {
 		const cachedResults = [];
@@ -100,12 +104,13 @@ export default {
 
 	/**
 	 * Fetches and parses poe2db using Regex
-	 * Optimized to scan only a small window of the HTML
+	 * @param {string} id - The MTX ID to check
+	 * @returns {Object} - Result object with found, available, and debug info
 	 */
 	async fetchAndParseOne(id) {
 		const dbUrl = derivePoe2DBLink(id);
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
 		const result = {
 			id,
@@ -125,6 +130,7 @@ export default {
 					'Accept': 'text/html'
 				}
 			});
+
 			result.debug.httpStatus = res.status;
 
 			// Fail if we get a non-200 response
@@ -151,28 +157,36 @@ export default {
 			}
 
 			// Build context of just the HTML of the tab we want
-			const contextWindow = 2048;
+			const contextWindow = 8192;
 			const context = html.substring(tabStart, Math.min(tabStart + contextWindow, html.length));
 			result.debug.contextScanned = true;
 
 			// Regex looks for: <td>Path of Exile 2</td> ... <td>Value</td>
-			const match = context.match(/<td[^>]*>Path of Exile 2<\/td>[\s\S]{0,500}?<td[^>]*>(.*?)<\/td>/i);
+			const poe2RowRegex = /<td[^>]*>Path of Exile 2<\/td>\s*<td[^>]*>([^<]*)<\/td>/i;
+			const match = context.match(poe2RowRegex);
 
 			if (match) {
 				const val = match[1].trim();
 				result.debug.parsedValue = val;
 				result.available = (val === '1');
 				result.debug.reason = result.available ? 'available' : 'not_available';
+
+				console.log(`[Worker] Parsed ID: ${id}, Value: '${val}', Available: ${result.available}`);
 			} else {
 				result.debug.regexMatch = false;
 				result.error = 'PoE2 row not found';
 				result.debug.reason = 'parse_fail';
+
+				// Log the failure context snippet for debugging
+				const lastFewChars = context.slice(-50);
+				console.warn(`[Worker] Failed to parse PoE2 row for ${id}. Last 50 chars: ${lastFewChars}`);
 			}
 		} catch (err) {
 			result.error = err.message;
 			result.debug.reason = 'network_error';
 			result.found = false;
 			result.available = false;
+			console.error(`[Worker] Network error for ${id}:`, err);
 		} finally {
 			clearTimeout(timeoutId);
 		}
