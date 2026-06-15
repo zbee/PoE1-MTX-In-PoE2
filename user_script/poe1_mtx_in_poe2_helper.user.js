@@ -9,8 +9,8 @@
 // @grant        none
 // @connect      p1mip2.zbee.codes
 // @run-at       document-end
-// @updateURL    https://raw.githubusercontent.com/zbee/PoE1-MTX-In-PoE2/main/user_script/poe1_mtx_in_poe2_helper.user.js
-// @downloadURL  https://raw.githubusercontent.com/zbee/PoE1-MTX-In-PoE2/main/user_script/poe1_mtx_in_poe2_helper.user.js
+// @updateURL    https://github.com/zbee/PoE1-MTX-In-PoE2/raw/refs/heads/main/user_script/poe1_mtx_in_poe2_helper.user.js
+// @downloadURL  https://github.com/zbee/PoE1-MTX-In-PoE2/raw/refs/heads/main/user_script/poe1_mtx_in_poe2_helper.user.js
 // ==/UserScript==
 
 /*

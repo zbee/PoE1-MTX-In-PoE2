@@ -18,7 +18,7 @@ You need a userscript manager extension installed first.
 1. **Install [Violentmonkey](https://violentmonkey.github.io/get-it/)** (or the original, but closed source, [Tampermonkey](https://www.tampermonkey.net/))
 2. Click the button below to install the script.
 
-[![Install Directly](https://img.shields.io/badge/Install%20Script-Click%20Here-blue?style=for-the-badge)](https://raw.githubusercontent.com/zbee/poe1-mtx-in-poe2/main/poe1_mtx_in_poe2_helper.user.js)
+[![Install Directly](https://img.shields.io/badge/Install%20Script-Click%20Here-blue?style=for-the-badge)](https://github.com/zbee/PoE1-MTX-In-PoE2/raw/refs/heads/main/user_script/poe1_mtx_in_poe2_helper.user.js)
 
 *(this should open a new tab, with a prompt from `*`monkey to install the user script)*
 
