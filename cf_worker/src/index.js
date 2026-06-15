@@ -186,13 +186,6 @@ export default {
 				result.error = 'PoE2 row not found';
 				result.debug.reason = 'parse_fail';
 			}
-			// Fail if not found
-			if (tabStart === -1) {
-				result.debug.tab_found = false;
-				result.error = 'Tab not found';
-				result.debug.reason = 'tab_missing';
-				return result;
-			}
 		} catch (err) {
 			result.error = err.message;
 			result.debug.reason = 'network_error';
