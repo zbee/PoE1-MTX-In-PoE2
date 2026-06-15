@@ -6,6 +6,7 @@
 // @author       Ethan Henderson (zbee)
 // @match        https://www.pathofexile.com/shop/category/*
 // @match        https://www.pathofexile.com/shop/item/*
+// @match        https://www.pathofexile.com/shop/watchlist
 // @grant        none
 // @connect      p1mip2.zbee.codes
 // @run-at       document-end
