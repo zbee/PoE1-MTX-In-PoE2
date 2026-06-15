@@ -6,6 +6,10 @@ Check PoE1 Microtransaction availability in PoE2 directly in the shop.
 This userscript overlays status indicators on each item in the PoE1 shop
 indicating its status in PoE2 by checking PoE2DB.
 
+Theoretically all PoE1 items will become available in PoE2, and hopefully just
+also be in PoE2's own shop, but neither of those is the case as of yet, so this
+aims to help fill that gap.
+
 ![PoE1 Shop Overview](./assets/shop-overview.png)
 
 ![Purchase Modal View](./assets/purchase-popup.png)
@@ -64,6 +68,10 @@ Cloudflare Worker at `p1mip2.zbee.codes`.
   - But for other languages of the PoE shop? That's more of an issue, no clue if it would work or not.
 - Supporter packs are not supported at all either.
   - Really the same as the first point, but is something I would like to specifically have working.
+- Everything HTML is rather rigid, and prone to breakage.
+  - The ID extraction from the PoE1 shop is quite rigid, though I imagine that is less likely to change.
+  - The PoE2 compatibility checking on PoE2DB is insanely rigid, and even more prone to breakage, and that may actually change on me.
+  - Both should be made more flexible.
 
 ---
 
