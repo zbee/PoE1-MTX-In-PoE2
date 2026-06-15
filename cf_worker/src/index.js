@@ -148,6 +148,8 @@ export default {
 			// Find where the mtx tab starts
 			const hashFragment = `${id}Microtransaction`;
 			const tabStart = html.indexOf(`id="${hashFragment}"`);
+			let match = null;
+			const poe2Regex = /<td[^>]*>Path of Exile 2<\/td>\s*<td[^>]*>(.*?)<\/td>/i;
 
 			// Found the tab we want (most shop items)
 			if (tabStart !== -1) {
