@@ -110,7 +110,7 @@ export default {
 	async fetchAndParseOne(id) {
 		const dbUrl = derivePoe2DBLink(id);
 		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+		const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
 		const result = {
 			id,
